@@ -1,6 +1,286 @@
 {
-  "AWSTemplateFormatVersion" : "2010-09-09",
-  "Description" : "CloudFormation template file.",
-  "Resources" : {
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Create-Snapshot - scheduled job worker instance",
+  "Parameters": {
+    "KeyName": {
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "64",
+      "AllowedPattern": "[-_ a-zA-Z0-9]*",
+      "ConstraintDescription": "can contain only alphanumeric characters, spaces, dashes and underscores."
+    },
+    "SSHFrom" : {
+      "Description" : "Lockdown SSH access to the bastion host (default can be accessed from anywhere)",
+      "Type" : "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default" : "0.0.0.0/0",
+      "AllowedPattern" : "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription" : "must be a valid CIDR range of the form x.x.x.x/x."
+    },
+    "WorkerInstanceType": {
+      "Default": "t1.micro",
+      "Description": "Worker EC2 instance type",
+      "Type": "String",
+      "AllowedValues": [
+        "t1.micro",
+        "m3.xlarge", "m3.2xlarge",
+        "m1.small", "m1.medium", "m1.large", "m1.xlarge",
+        "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge",
+        "c1.xlarge",
+        "cc2.8xlarge",
+        "m2.xlarge", "m2.2xlarge", "m2.4xlarge",
+        "cr1.8xlarge",
+        "hi1.4xlarge",
+        "hs1.8xlarge",
+        "t1.micro",
+        "g2.2xlarge",
+        "cg1.4xlarge"
+      ],
+      "ConstraintDescription": "must be a valid EC2 instance type."
+    },
+    "VpcId" : {
+      "Description" : "VPC ID",
+      "Type" : "String",
+      "MinLength": "1",
+      "MaxLength": "12",
+      "AllowedPattern" : "vpc-[a-zA-Z0-9]*"
+    },
+    "Subnets" : {
+      "Type" : "CommaDelimitedList",
+      "Description" : "The list of SubnetIds in your Virtual Private Cloud (VPC)"
+    }
+  },
+  "Mappings": {
+    "AWSAmazonLinuxAMI": {
+      "us-east-1":      { "name":"Virginia",   "201303": "ami-3275ee5b", "201309": "ami-35792c5c" },
+      "us-west-2":      { "name":"Oregon",     "201303": "ami-ecbe2adc", "201309": "ami-d03ea1e0" },
+      "us-west-1":      { "name":"California", "201303": "ami-66d1fc23", "201309": "ami-687b4f2d" },
+      "eu-west-1":      { "name":"Ireland",    "201303": "ami-44939930", "201309": "ami-149f7863" },
+      "ap-southeast-1": { "name":"Singapole",  "201303": "ami-aa9ed2f8", "201309": "ami-14f2b946" },
+      "ap-southeast-2": { "name":"Sydney",     "201303": "ami-363eaf0c", "201309": "ami-a148d59b" },
+      "ap-northeast-1": { "name":"Tokyo",      "201303": "ami-173fbf16", "201309": "ami-3561fe34" },
+      "sa-east-1":      { "name":"SaoPaulo",   "201303": "ami-dd6bb0c0", "201309": "ami-9f6ec982" }
+    }
+  },
+  "Resources": {
+    "PowerUserRole" : {
+      "Type" : "AWS::IAM::Role",
+      "Properties" : {
+        "AssumeRolePolicyDocument" : {
+          "Statement": [ {
+            "Effect": "Allow",
+              "Principal": {
+                "Service": [ "ec2.amazonaws.com" ]
+              },
+              "Action": [ "sts:AssumeRole" ]
+          } ]
+        },
+        "Path" : "/",
+        "Policies" :[ {
+          "PolicyName" : "PowerUserPolicy",
+          "PolicyDocument" : {
+            "Statement": [ {
+              "Sid": "PowerUserStmt",
+              "Effect": "Allow",
+              "NotAction": "iam:*",
+              "Resource": "*"
+            } ]
+          }
+        }]
+      }
+    },
+    "PowerUserProfile" : {
+      "Type" : "AWS::IAM::InstanceProfile",
+      "Properties" : {
+        "Path": "/",
+        "Roles" : [ { "Ref" : "PowerUserRole" } ]
+      }
+    },
+
+    "VPCDefaultSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "GroupDescription" : "Allow all communications in VPC"
+      }
+    },
+    "VPCDefaultSecurityGroupIngress" : {
+      "Type" : "AWS::EC2::SecurityGroupIngress",
+      "Properties" : {
+        "GroupId" : { "Ref" : "VPCDefaultSecurityGroup" },
+        "IpProtocol" : "tcp",
+        "FromPort" : "0",
+        "ToPort" : "65535",
+        "SourceSecurityGroupId" : { "Ref" : "VPCDefaultSecurityGroup" }
+      }
+    }, 
+    "WorkerSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VpcId" },
+        "GroupDescription" : "Enable Web/SSH access from permitted location",
+        "SecurityGroupIngress" : [
+          { "IpProtocol" : "tcp", "FromPort" : "22",  "ToPort" : "22",  "CidrIp" : { "Ref" : "SSHFrom" }},
+          { "IpProtocol" : "tcp", "FromPort" : "80",  "ToPort" : "80",  "CidrIp" : { "Ref" : "SSHFrom" }}
+        ]
+      }
+    },
+
+    "LaunchConfiguration" : {
+      "Type" : "AWS::AutoScaling::LaunchConfiguration",
+      "Properties" : {
+        "ImageId": { "Fn::FindInMap": [ "AWSAmazonLinuxAMI", { "Ref": "AWS::Region" }, "201309" ]},
+        "InstanceMonitoring" : false,
+        "AssociatePublicIpAddress" : true,
+        "InstanceType" : { "Ref" : "WorkerInstanceType" },
+        "IamInstanceProfile" : { "Ref" : "PowerUserProfile" },
+        "KeyName" : { "Ref" : "KeyName" },
+        "SecurityGroups" : [
+          { "Ref" : "WorkerSecurityGroup" },
+          { "Ref" : "VPCDefaultSecurityGroup" }
+        ],
+        "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#! /bin/bash -v\n",
+          "yum update -y\n",
+          "","\n",
+          "# Helper function\n",
+          "function error_exit\n",
+          "{\n",
+          "  /opt/aws/bin/cfn-signal -e 1 -r \"$1\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "  exit 1\n",
+          "}\n",
+          "","\n",
+          "# Install packages\n",
+          "/opt/aws/bin/cfn-init -s ", { "Ref" : "AWS::StackId" }, " -r LaunchConfiguration ",
+          "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
+          "","\n",
+          "echo '/tmp/put_scale_schedule'   | tee -a /etc/rc.local","\n",
+          "echo '/tmp/put_create_snapshots' | tee -a /etc/rc.local","\n",
+          "echo '/tmp/stop_myself'          | tee -a /etc/rc.local","\n",
+          "","\n",
+          "","\n",
+          "/opt/aws/bin/cfn-signal -e 0 '", { "Ref" : "WaitHandle" }, "'\n"
+        ]]}}
+      },
+      "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "config" : {
+            "packages" : {
+              "yum" : {
+                "jq" : []
+              }
+            },
+            "files" : {
+              "/tmp/put_scale_schedule" : {
+                "content" : { "Fn::Join" : ["", [
+                "#!/bin/sh","\n",
+                "","\n",
+                "export AWS_DEFAULT_REGION=",{ "Ref" : "AWS::Region" },"\n",
+                "as_group=$(aws autoscaling describe-auto-scaling-groups | jq -r '.AutoScalingGroups[] | ","\n",
+                "           select ( .Tags[].Key == \"aws:cloudformation:stack-name\" ","\n",
+                "                and .Tags[].Value == \"", { "Ref" : "AWS::StackName" } ,"\" ) | ","\n",
+                "           .AutoScalingGroupName ')","\n",
+                "","\n",
+                "aws autoscaling put-scheduled-update-group-action \\","\n",
+                "    --auto-scaling-group-name $as_group \\","\n",
+                "    --scheduled-action-name cm-create-snapshot \\","\n",
+                "    --recurrence \"0 0 * * *\" ","\n",
+                "    --desired-capacity 1","\n",
+                "","\n",
+                "","\n",
+                "","\n",
+                "","\n"
+                ]] },
+                "mode"   : "000700",
+                "owner"  : "root",
+                "group"  : "root"
+              },
+              "/tmp/create_snapshots" : {
+                "content" : { "Fn::Join" : ["", [
+                "#!/bin/sh","\n",
+                "#","\n",
+                "export AWS_DEFAULT_REGION=",{ "Ref" : "AWS::Region" },"\n",
+                "workdir=/tmp","\n",
+                "mkdir -p $workdir","\n",
+                "yyyymmdd=$(date +'%Y-%m-%d')","\n",
+                "purge_after_days=7","\n",
+                "","\n",
+                "get_purge_after_date()","\n",
+                "{","\n",
+                "  case `uname` in","\n",
+                "    Linux) echo `date -d +${purge_after_days}days -u +%Y-%m-%d` ;;","\n",
+                "    Darwin) echo `date -v+${purge_after_days}d -u +%Y-%m-%d` ;;","\n",
+                "    *) echo `date -d +${purge_after_days}days -u +%Y-%m-%d` ;;","\n",
+                "  esac","\n",
+                "}","\n",
+                "","\n",
+                "purgeafter=`get_purge_after_date`","\n",
+                "volumes=$(aws ec2 describe-volumes --query \"Volumes[*].VolumeId\" --output text)","\n",
+                "","\n",
+                "for vol in $volumes; do","\n",
+                "  echo \"checking backup flag of volume [$vol]\"","\n",
+                "  backup=$(aws ec2 describe-tags \\","\n",
+                "           --filters \"Name=resource-type,Values=volume\" \\","\n",
+                "                     \"Name=resource-id,Values=$vol\" \\","\n",
+                "                     \"Name=key,Values=Backup\" \\","\n",
+                "           --query \"Tags[*].Value\" --output text)","\n",
+                "  if [ -n \"$backup\" ]; then","\n",
+                "    echo \"backup volume [$vol]\"","\n",
+                "    aws ec2 create-snapshot --volume-id $vol --description \"ec2ab_${vol}_${yyyymmdd}\" > $workdir/create-snapshot-result.json","\n",
+                "    snapshotid=$(cat $workdir/create-snapshot-result.json | jq -r \".SnapshotId\")","\n",
+                "    aws ec2 create-tags --resources $snapshotid --tags Key=PurgeAllow,Value=true > $workdir/create-tags-purgeallow.json","\n",
+                "    aws ec2 create-tags --resources $snapshotid --tags Key=PurgeAfter,Value=$purgeafter > $workdir/create-tags-purgeafter.json","\n",
+                "  fi","\n",
+                "done","\n"
+                ]] },
+                "mode"   : "00700",
+                "owner"  : "root",
+                "group"  : "root"
+              },
+              "/tmp/stop_myself" : {
+                "content" : { "Fn::Join" : ["", [
+                "#!/bin/sh","\n",
+                "#","\n",
+                "","\n"
+                ]] },
+                "mode"   : "000700",
+                "owner"  : "root",
+                "group"  : "root"
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "AutoScalingGroupServers" : {
+      "Type" : "AWS::AutoScaling::AutoScalingGroup",
+      "Properties" : {
+        "AvailabilityZones" : { "Fn::GetAZs" : { "Ref" : "AWS::Region" } },
+        "DesiredCapacity" : "1",
+        "HealthCheckGracePeriod" : "300",
+        "HealthCheckType" : "EC2",
+        "LaunchConfigurationName" : { "Ref" : "LaunchConfiguration" },
+        "MinSize" : "0",
+        "MaxSize" : "1",
+        "VPCZoneIdentifier" : { "Ref" : "Subnets" },
+        "Tags": [
+          { "Key": "Name", "Value": "JobWorker", "PropagateAtLaunch" : "true" }
+        ]
+      }
+    },
+    "WaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    },
+    "WaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : "AutoScalingGroupServers",
+      "Properties" : {
+        "Handle" : {"Ref" : "WaitHandle"},
+        "Timeout" : "3600"
+      }
+    }
   }
 }
