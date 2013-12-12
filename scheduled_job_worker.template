@@ -50,6 +50,11 @@
     "Subnets" : {
       "Type" : "CommaDelimitedList",
       "Description" : "The list of SubnetIds in your Virtual Private Cloud (VPC)"
+    },
+    "Recurrence" : {
+      "Type" : "String",
+      "Description" : "backup schedule. crontab style syntax. ex) 0 0 * * *",
+      "Default" : "0 0 * * *"
     }
   },
   "Mappings": {
@@ -155,9 +160,9 @@
           "/opt/aws/bin/cfn-init -s ", { "Ref" : "AWS::StackId" }, " -r LaunchConfiguration ",
           "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
           "","\n",
-          "echo '/tmp/put_scale_schedule'  | tee -a /etc/rc.local","\n",
-          "echo '/tmp/create_snapshots'    | tee -a /etc/rc.local","\n",
-          "echo '/tmp/stop_myself'         | tee -a /etc/rc.local","\n",
+          "echo '/tmp/put_scale_schedule 2>&1 | logger ' | tee -a /etc/rc.local","\n",
+          "echo '/tmp/create_snapshots 2>&1 | logger '   | tee -a /etc/rc.local","\n",
+          "echo '/tmp/stop_myself 2>&1 | logger '        | tee -a /etc/rc.local","\n",
           "","\n",
           "","\n",
           "/opt/aws/bin/cfn-signal -e 0 '", { "Ref" : "WaitHandle" }, "'\n"
@@ -186,12 +191,8 @@
                 "aws autoscaling put-scheduled-update-group-action \\","\n",
                 "    --auto-scaling-group-name $as_group \\","\n",
                 "    --scheduled-action-name cm-create-snapshot \\","\n",
-                "    --recurrence \"0 0 * * *\" \\","\n",
-                "    --desired-capacity 1","\n",
-                "","\n",
-                "","\n",
-                "","\n",
-                "","\n"
+                "    --recurrence \"", { "Ref" : "Recurrence" } ,"\" \\","\n",
+                "    --desired-capacity 1","\n"
                 ]] },
                 "mode"   : "000755",
                 "owner"  : "root",
