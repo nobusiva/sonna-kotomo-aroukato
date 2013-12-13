@@ -9,7 +9,7 @@ buildscript {
 }
 
 ext {
-	artifactId = 'scheduled_job_worker'
+	artifactId = 'sonna-kotomo-aroukato'
 	templateBucket = 'cm-public-cfn-templates'
 }
 
