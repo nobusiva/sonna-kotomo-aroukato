@@ -44,6 +44,11 @@
       "Type" : "String",
       "Description" : "backup schedule. crontab style syntax. ex) 0 0 * * *",
       "Default" : "0 0 * * *"
+    },
+    "BackupRetention" : {
+      "Type" : "Number",
+      "Description" : "Days of backup retention",
+      "Default" : "7"
     }
   },
   "Mappings": {
@@ -305,7 +310,7 @@
                 "workdir=/tmp","\n",
                 "mkdir -p $workdir","\n",
                 "date_current=$(date +'%Y-%m-%d')","\n",
-                "purge_after_days=7","\n",
+                "purge_after_days=", { "Ref" : "BackupRetention" } ,"\n",
                 "","\n",
                 "get_purge_after_date()","\n",
                 "{","\n",
