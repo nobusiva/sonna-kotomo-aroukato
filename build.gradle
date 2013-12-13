@@ -9,11 +9,11 @@ buildscript {
 }
 
 ext {
-	artifactId = 'scheduled_job_worker'
+	artifactId = 'sonna-kotomo-aroukato'
 	templateBucket = 'cm-public-cfn-templates'
 }
 
-version = '1.0-SNAPSHOT'
+version = '1.0'
 
 apply plugin: 'aws'
 aws {
