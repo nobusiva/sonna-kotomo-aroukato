@@ -9,7 +9,7 @@ buildscript {
 }
 
 ext {
-	artifactId = 'cfnbase'
+	artifactId = 'scheduled_job_worker'
 	templateBucket = 'cm-public-cfn-templates'
 }
 
