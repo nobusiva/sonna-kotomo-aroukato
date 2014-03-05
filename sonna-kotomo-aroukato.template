@@ -409,7 +409,10 @@
     "AutoScalingGroupServers" : {
       "Type" : "AWS::AutoScaling::AutoScalingGroup",
       "Properties" : {
-        "AvailabilityZones" : { "Fn::GetAZs" : { "Ref" : "AWS::Region" } },
+        "AvailabilityZones" : [
+          { "Fn::FindInMap" : [ "AZ", { "Ref": "AWS::Region" }, "primary" ]},
+          { "Fn::FindInMap" : [ "AZ", { "Ref": "AWS::Region" }, "secondary" ]}
+        ],
         "DesiredCapacity" : "1",
         "HealthCheckGracePeriod" : "300",
         "HealthCheckType" : "EC2",
